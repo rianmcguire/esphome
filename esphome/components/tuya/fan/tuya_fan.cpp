@@ -27,8 +27,16 @@ void TuyaFan::setup() {
   }
   if (this->oscillation_id_.has_value()) {
     this->parent_->register_listener(*this->oscillation_id_, [this](const TuyaDatapoint &datapoint) {
-      ESP_LOGV(TAG, "MCU reported oscillation is: %s", ONOFF(datapoint.value_bool));
-      this->oscillating = datapoint.value_bool;
+      this->oscillation_type_ = datapoint.type;
+      if (this->oscillation_type_ == TuyaDatapointType::BOOLEAN) {
+        ESP_LOGV(TAG, "MCU reported oscillation is: %s", ONOFF(datapoint.value_bool));
+        this->oscillating = datapoint.value_bool;
+      } else if (this->oscillation_type_ == TuyaDatapointType::ENUM) {
+        ESP_LOGV(TAG, "MCU reported oscillation is: %s", datapoint.value_enum);
+        this->oscillating = datapoint.value_enum == 1;
+      } else {
+        ESP_LOGE(TAG, "Oscillation has unhandled type %02X", datapoint.type);
+      }
       this->publish_state();
     });
   }
@@ -73,7 +81,12 @@ void TuyaFan::control(const fan::FanCall &call) {
     this->parent_->set_boolean_datapoint_value(*this->switch_id_, *call.get_state());
   }
   if (this->oscillation_id_.has_value() && call.get_oscillating().has_value()) {
-    this->parent_->set_boolean_datapoint_value(*this->oscillation_id_, *call.get_oscillating());
+    if (this->oscillation_type_ == TuyaDatapointType::BOOLEAN) {
+      this->parent_->set_boolean_datapoint_value(*this->oscillation_id_, *call.get_oscillating());
+    } else if (this->oscillation_type_ == TuyaDatapointType::ENUM) {
+      uint8_t value = *call.get_oscillating() ? 1 : 0;
+      this->parent_->set_enum_datapoint_value(*this->oscillation_id_, value);
+    }
   }
   if (this->direction_id_.has_value() && call.get_direction().has_value()) {
     bool enable = *call.get_direction() == fan::FanDirection::REVERSE;
